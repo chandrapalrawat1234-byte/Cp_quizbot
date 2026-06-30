@@ -15,114 +15,82 @@ const allowedUsers = new Set();
 const authenticatedUsers = new Set(); 
 const userStates = {}; 
 
+// यूजर का कतार (Queue) सिस्टम ताकि बोट कभी न अटके
+const userQueues = {}; 
+const isProcessingQueue = {};
+
 const CHANNEL_LINK = 'https://t.me/gkandgs12';
 const GROUP_LINK = 'https://t.me/gkandgs85';
 const QUIZ_CLUB_LINK = 'https://t.me/QuizClub15seconds';
-const TARGET_CHANNEL = '@gkandgs12'; // ऑटो-पोस्ट के लिए चैनल का यूजरनेम
+const TARGET_CHANNEL = '@gkandgs12';
 
-// 🛑 सुपर एंटी-क्रैश: कोई भी एरर बोट को बंद नहीं कर पाएगा
 process.on('uncaughtException', (err) => console.log('क्रैश रोका गया:', err.message));
 process.on('unhandledRejection', (reason) => console.log('प्रॉमिस एरर रोका गया:', reason));
 
-// 📱 नीचे कीबोर्ड (Sticker Area) वाले परमानेंट बटन्स
 const mainKeyboard = Markup.keyboard([
   ['📝 क्विज बनाएं (Create)', '🔑 यूजर परमिशन (Allow)'],
   ['📢 ऑटो-पोस्ट चैनल में (Auto-Post)', 'ℹ️ सही फॉर्मेट / हेल्प']
 ]).resize();
 
-// 1. स्टार्ट कमांड
 bot.start((ctx) => {
   const userId = ctx.from.id.toString();
   if (allowedUsers.has(userId) || authenticatedUsers.has(userId)) {
-      ctx.reply(`👑 **प्रणाम CP Rawat Sir!**\nआपका परमानेंट कीबोर्ड नीचे (टाइपिंग एरिया में) एक्टिव कर दिया गया है।👇`, mainKeyboard);
+      ctx.reply(`👑 **प्रणाम CP Rawat Sir!**\nआपका परमानेंट कीबोर्ड नीचे एक्टिव है। 100 प्रश्नों का नया 'Queue System' चालू है।👇`, mainKeyboard);
   } else {
-      ctx.reply(`🛑 यह CP Rawat Sir का प्राइवेट बोट है।\nकृपया पासवर्ड दर्ज करें (पासवर्ड पता है तो सीधे टाइप करें):`);
+      ctx.reply(`🛑 यह CP Rawat Sir का प्राइवेट बोट है।\nकृपया पासवर्ड दर्ज करें:`);
   }
 });
 
-// 2. परमानेंट कीबोर्ड बटन्स के एक्शन
 bot.hears('📝 क्विज बनाएं (Create)', (ctx) => {
   const userId = ctx.from.id.toString();
   if (!authenticatedUsers.has(userId)) return ctx.reply('❌ पहले लॉगिन करें!');
-  
   userStates[userId] = 'CREATE_POLL';
-  ctx.reply('📝 **क्विज मोड चालू!**\nअपने प्रश्न बुक फॉर्मेट में यहाँ पेस्ट करें। (मैं उन्हें तुरंत यहीं पर क्विज में बदल दूँगा)');
+  ctx.reply('📝 **क्विज मोड चालू!**\nअपने 100 प्रश्न यहाँ एक साथ पेस्ट करें। बोट उन्हें लाइन में लगाकर हर 2 सेकंड में 1-1 करके बनाएगा ताकि अटके नहीं।');
 });
 
 bot.hears('🔑 यूजर परमिशन (Allow)', (ctx) => {
   const userId = ctx.from.id.toString();
   if (!authenticatedUsers.has(userId)) return ctx.reply('❌ पहले लॉगिन करें!');
-  ctx.reply('🔑 **परमिशन कैसे दें?**\nकिसी भी यूजर का कोई भी मैसेज मुझे फॉरवर्ड करें, मैं उसकी आईडी निकाल कर दूँगा। फिर आप `/allow ID` लिखकर उसे चालू कर सकते हैं।');
+  ctx.reply('🔑 **परमिशन कैसे दें?**\nकिसी भी यूजर का मैसेज मुझे फॉरवर्ड करें, मैं आईडी दूँगा। फिर `/allow ID` लिखें।');
 });
 
 bot.hears('ℹ️ सही फॉर्मेट / हेल्प', (ctx) => {
-  const helpText = 
-    `📖 **सही बुक फॉर्मेट (जिसे बोट तुरंत पहचानता है):**\n\n` +
-    `Q. मानव शरीर की सबसे बड़ी ग्रंथि कौन सी है?\n` +
-    `A) थायराइड\n` +
-    `B) यकृत ✅\n` +
-    `C) पिट्यूटरी\n` +
-    `D) अग्न्याशय\n\n` +
-    `व्याख्या: यकृत शरीर की सबसे बड़ी ग्रंथि है।\n\n` +
-    `⚠️ **नोट:** सही उत्तर के आगे ✅ लगाना ज़रूरी है और हर प्रश्न के बीच एक खाली लाइन (Space) छोड़ें।`;
-  ctx.reply(helpText);
+  ctx.reply(`⚠️ **नोट:** सही उत्तर के आगे ✅ लगाना ज़रूरी है और हर प्रश्न के बीच एक खाली लाइन छोड़ें।`);
 });
 
 bot.hears('📢 ऑटो-पोस्ट चैनल में (Auto-Post)', (ctx) => {
   const userId = ctx.from.id.toString();
   if (!authenticatedUsers.has(userId)) return ctx.reply('❌ पहले लॉगिन करें!');
-  
   userStates[userId] = 'AUTO_POST_MODE';
-  ctx.reply(`📢 **ऑटो-पोस्ट मोड चालू!**\n\nअपने सभी 50-100 प्रश्न यहाँ पेस्ट करें। बोट उन्हें अपने अंदर सेव कर लेगा और अपने आप सीधे आपके चैनल (${TARGET_CHANNEL}) में भेजना शुरू कर देगा।\n(बोट को चैनल में एडमिन बनाना न भूलें!)`);
+  ctx.reply(`📢 **ऑटो-पोस्ट चालू!**\nप्रश्न डालें, बोट सीधे चैनल (${TARGET_CHANNEL}) में हर 2 सेकंड में भेजता रहेगा।`);
 });
 
-// 3. साधारण टेक्स्ट और प्रश्न पकड़ना
 bot.on('text', async (ctx, next) => {
   const text = ctx.message.text;
   const userId = ctx.from.id.toString();
 
-  // पासवर्ड चेक
   if (text === currentPassword) {
       authenticatedUsers.add(userId);
       allowedUsers.add(userId);
-      return ctx.reply('✅ पासवर्ड सही है! आपका बोट अनलॉक हो गया है।', mainKeyboard);
+      return ctx.reply('✅ पासवर्ड सही है! बोट अनलॉक हो गया है।', mainKeyboard);
   }
 
-  // आईडी फाइंडर (फॉरवर्ड मैसेज)
-  if (ctx.message.forward_date) {
-    if (ctx.message.forward_from) {
-      return ctx.reply(`🔍 **यूजर आईडी:** \`${ctx.message.forward_from.id}\`\nइसे परमिशन देने के लिए लिखें: \`/allow ${ctx.message.forward_from.id}\``, { parse_mode: 'Markdown' });
-    }
-  }
-
-  // परमिशन कमांड
-  if (text.startsWith('/allow ') && allowedUsers.has(userId)) {
-    const target = text.split(' ')[1];
-    allowedUsers.add(target.trim());
-    return ctx.reply(`✅ यूज़र ${target} को परमिशन मिल गई है।`);
-  }
-
-  // क्विज बनाना (डायरेक्ट)
-  if (userStates[userId] === 'CREATE_POLL') {
-      await processQuizzes(ctx, text, false);
-      return;
-  }
-
-  // ऑटो पोस्ट (चैनल के लिए)
-  if (userStates[userId] === 'AUTO_POST_MODE') {
-      await processQuizzes(ctx, text, true);
+  if (userStates[userId] === 'CREATE_POLL' || userStates[userId] === 'AUTO_POST_MODE') {
+      const isAutoPost = userStates[userId] === 'AUTO_POST_MODE';
+      addQuizzesToQueue(ctx, text, userId, isAutoPost);
       return;
   }
 
   await next();
 });
 
-// 4. मुख्य इंजन: प्रश्नों को पढ़ना और बनाना (बिना क्रैश हुए)
-async function processQuizzes(ctx, text, isAutoPost) {
+// प्रश्नों को छांटकर कतार (Queue) में डालना
+function addQuizzesToQueue(ctx, text, userId, isAutoPost) {
   const rawQuestions = text.split(/(?=Q\.|Q\s|प्रश्न\s|प्र\.)/i);
-  let successCount = 0;
   
-  ctx.reply(`⏳ प्रश्नों की छंटाई चालू है, कृपया प्रतीक्षा करें...`);
+  if (!userQueues[userId]) userQueues[userId] = [];
+
+  let addedCount = 0;
 
   for (const rawQ of rawQuestions) {
     if (!rawQ.trim() || rawQ.trim().length < 10) continue;
@@ -138,8 +106,7 @@ async function processQuizzes(ctx, text, isAutoPost) {
       const line = lines[i];
       if (line.toLowerCase().startsWith('व्याख्या:') || line.toLowerCase().startsWith('explain:')) {
         let ext = line.replace(/व्याख्या:|explain:/i, '').trim();
-        // टेलीग्राम की 200 अक्षर लिमिट का परमानेंट इलाज (ताकि बोट क्रैश न हो)
-        if (ext.length > 150) ext = ext.substring(0, 145) + '...';
+        if (ext.length > 150) ext = ext.substring(0, 145) + '...'; // क्रैश रोकने के लिए लिमिट
         explanation = `${ext}${promo}`;
         break;
       }
@@ -155,40 +122,62 @@ async function processQuizzes(ctx, text, isAutoPost) {
     }
 
     if (options.length >= 2 && correctOptionId !== -1) {
-      try {
-        if (isAutoPost) {
-            // ऑटो-पोस्ट: सीधे चैनल में भेजना
-            await bot.telegram.sendQuiz(TARGET_CHANNEL, question, options, {
-                correct_option_id: correctOptionId,
-                explanation: explanation,
-                is_anonymous: true
-            });
-        } else {
-            // साधारण मोड: आपको यहीं रिप्लाई करना
-            await ctx.replyWithQuiz(question, options, {
-                correct_option_id: correctOptionId,
-                explanation: explanation,
-                is_anonymous: true // ऑफिशियल बोट के लिए गुप्त रखना ज़रूरी है
-            });
-        }
-        successCount++;
-        await new Promise(resolve => setTimeout(resolve, 1500)); // स्पैम से बचने के लिए टाइमर
-      } catch (err) {
-        console.log(`प्रश्न स्किप किया गया (टेलीग्राम एरर): ${err.message}`);
-      }
+      userQueues[userId].push({
+          question, 
+          options, 
+          correctOptionId, 
+          explanation, 
+          isAutoPost 
+      });
+      addedCount++;
     }
   }
-  ctx.reply(`✅ काम पूरा हुआ! कुल ${successCount} पोल सफलता पूर्वक ${isAutoPost ? 'चैनल में भेज दिए गए हैं' : 'तैयार हैं'}!`, mainKeyboard);
+
+  if (addedCount > 0) {
+      ctx.reply(`📥 आपके ${addedCount} प्रश्न कतार (लाइन) में लग गए हैं। प्रक्रिया चालू है...`);
+      // अगर पहले से प्रोसेसिंग नहीं चल रही है, तो चालू करें
+      if (!isProcessingQueue[userId]) {
+          processQueue(ctx, userId);
+      }
+  }
 }
 
-// 5. सर्वर और 24/7 चालू रखने का सिस्टम
-const app = express();
-app.get('/', (req, res) => res.send('CP Rawat Sir Super Bot is 24/7 Active!'));
-app.listen(process.env.PORT || 3000, () => {
-    console.log("Web server is running!");
-});
+// कतार को हर 2 सेकंड में एक-एक करके प्रोसेस करना (आपका आइडिया)
+async function processQueue(ctx, userId) {
+  isProcessingQueue[userId] = true;
 
-bot.launch().then(() => {
-  console.log('🚀 CP Super Bot Started Successfully!');
-});
+  while (userQueues[userId] && userQueues[userId].length > 0) {
+      const quizData = userQueues[userId].shift(); // लाइन में से पहला प्रश्न निकालें
+
+      try {
+          if (quizData.isAutoPost) {
+              await bot.telegram.sendQuiz(TARGET_CHANNEL, quizData.question, quizData.options, {
+                  correct_option_id: quizData.correctOptionId,
+                  explanation: quizData.explanation,
+                  is_anonymous: true
+              });
+          } else {
+              await ctx.replyWithQuiz(quizData.question, quizData.options, {
+                  correct_option_id: quizData.correctOptionId,
+                  explanation: quizData.explanation,
+                  is_anonymous: true 
+              });
+          }
+      } catch (err) {
+          console.log(`एरर: ${err.message}`);
+      }
+
+      // ⏳ हर प्रश्न के बाद 2 सेकंड का गैप (ताकि टेलीग्राम बोट को ब्लॉक न करे)
+      await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+
+  isProcessingQueue[userId] = false;
+  ctx.reply(`✅ आपके सभी प्रश्न सफलतापूर्वक तैयार हो गए हैं!`);
+}
+
+const app = express();
+app.get('/', (req, res) => res.send('CP Rawat Sir Super Bot Active!'));
+app.listen(process.env.PORT || 3000);
+
+bot.launch().then(() => console.log('🚀 Bot Started!'));
 
