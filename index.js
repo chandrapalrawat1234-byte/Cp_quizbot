@@ -2,7 +2,6 @@ import { Telegraf, Markup } from 'telegraf';
 import express from 'express';
 import PDFDocument from 'pdfkit';
 import fs from 'fs';
-import axios from 'axios';
 import 'dotenv/config';
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -18,14 +17,11 @@ const allowedUsers = new Set();
 const authenticatedUsers = new Set(); 
 const userStates = {}; 
 
-// ⏱️ अलग-अलग टाइमर (क्विज और पोस्ट के लिए)
 const userTimers = { quiz: 2000, post: 3600000 }; 
-
 const userQueues = {}; 
 const isProcessingQueue = {};
-const pdfData = {}; // PDF का डेटा सेव करने के लिए
+const pdfData = {}; 
 
-// 🔗 आपकी तीनों लिंक्स (अल्टरनेट रोटेशन के लिए - पुराना जादुई सिस्टम)
 const promoLinks = [
   '📢 चैनल: https://t.me/gkandgs12',
   '💬 ग्रुप: https://t.me/gkandgs85',
@@ -36,9 +32,7 @@ const TARGET_CHANNEL = '@gkandgs12';
 process.on('uncaughtException', (err) => console.log('क्रैश रोका गया:', err.message));
 process.on('unhandledRejection', (reason) => console.log('प्रॉमिस एरर रोका गया:', reason));
 
-// ==========================================
-// 📱 लेवल-वाइज कीबोर्ड (Sub-menus)
-// ==========================================
+// कीबोर्ड
 const mainMenu = Markup.keyboard([
   ['📝 क्विज (Quiz)', '📰 थ्योरी / पोस्ट'],
   ['📄 PDF मेकर (नोट्स)', '⚙️ सेटिंग्स']
@@ -50,7 +44,7 @@ const quizMenu = Markup.keyboard([
 ]).resize();
 
 const postMenu = Markup.keyboard([
-  ['📝 नई थ्योरी/पोस्ट डालें', '🌐 करंट अफेयर्स ऑटो-पोस्ट'],
+  ['📝 स्मार्ट थ्योरी पोस्ट डालें', '🌐 करंट अफेयर्स (चैनल में डालें)'],
   ['🔙 मुख्य मेनू']
 ]).resize();
 
@@ -64,15 +58,12 @@ const settingsMenu = Markup.keyboard([
   ['🔑 यूजर परमिशन', '🔙 मुख्य मेनू']
 ]).resize();
 
-// ==========================================
-// 🚀 स्टार्ट और नेविगेशन
-// ==========================================
 bot.start((ctx) => {
   const userId = ctx.from.id.toString();
   if (allowedUsers.has(userId) || authenticatedUsers.has(userId)) {
-      ctx.reply(`👑 **प्रणाम CP Rawat Sir!**\nआपका मास्टर बोट 24/7 चालू है।👇`, mainMenu);
+      ctx.reply(`👑 **प्रणाम CP Rawat Sir!**\nआपका मास्टर बोट चालू है।👇`, mainMenu);
   } else {
-      ctx.reply(`🛑 यह CP Rawat Sir का प्राइवेट बोट है।\nकृपया मास्टर पासवर्ड दर्ज करें:`);
+      ctx.reply(`🛑 यह प्राइवेट बोट है। मास्टर पासवर्ड दर्ज करें:`);
   }
 });
 
@@ -86,37 +77,37 @@ bot.hears('📰 थ्योरी / पोस्ट', (ctx) => ctx.reply('📰 
 bot.hears('📄 PDF मेकर (नोट्स)', (ctx) => ctx.reply('📄 PDF मेकर सेक्शन', pdfMenu));
 bot.hears('⚙️ सेटिंग्स', (ctx) => ctx.reply('⚙️ सेटिंग्स सेक्शन', settingsMenu));
 
-// ==========================================
-// ⏱️ टाइमर सेटिंग्स (क्विज और पोस्ट दोनों के लिए अलग)
-// ==========================================
+// ⏱️ टाइमर सेटिंग्स
 bot.hears('⏱️ क्विज टाइमर', (ctx) => {
     userStates[ctx.from.id.toString()] = 'SET_QUIZ_TIMER';
-    ctx.reply('⏱️ क्विज के लिए कितने **सेकंड** का गैप रखना है? (जैसे: 2, 5, 10)');
+    ctx.reply('⏱️ क्विज के लिए कितने **सेकंड** का गैप रखना है?');
 });
 
 bot.hears('⏱️ पोस्ट टाइमर', (ctx) => {
     userStates[ctx.from.id.toString()] = 'SET_POST_TIMER';
-    ctx.reply('⏱️ थ्योरी पोस्ट के लिए कितने **मिनट** का गैप रखना है? (जैसे: 60)');
+    ctx.reply('⏱️ पोस्ट के लिए कितने **मिनट** का गैप रखना है?');
 });
 
-// ==========================================
-// 🎯 आपका पुराना क्विज सिस्टम (रोटेटिंग लिंक्स के साथ)
-// ==========================================
 bot.hears('✍️ नया क्विज बनाएं', (ctx) => {
     if (!authenticatedUsers.has(ctx.from.id.toString())) return;
     userStates[ctx.from.id.toString()] = 'CREATE_POLL';
-    ctx.reply('📝 अपने क्विज प्रश्न पेस्ट करें। (2 सेकंड के गैप से बनेंगे)');
+    ctx.reply('📝 अपने क्विज प्रश्न पेस्ट करें।');
 });
 
 bot.hears('📢 क्विज ऑटो-पोस्ट (चैनल)', (ctx) => {
     if (!authenticatedUsers.has(ctx.from.id.toString())) return;
     userStates[ctx.from.id.toString()] = 'AUTO_POST_MODE';
-    ctx.reply(`📢 क्विज ऑटो-पोस्ट चालू! प्रश्न डालें (सेट टाइमर के हिसाब से चैनल में जाएंगे)।`);
+    ctx.reply(`📢 क्विज ऑटो-पोस्ट चालू! प्रश्न डालें।`);
 });
 
-// ==========================================
-// 📄 PDF विज़ार्ड (Step-by-step)
-// ==========================================
+// 🌐 स्मार्ट करंट अफेयर्स / पोस्ट
+bot.hears('🌐 करंट अफेयर्स (चैनल में डालें)', (ctx) => {
+    if (!authenticatedUsers.has(ctx.from.id.toString())) return;
+    userStates[ctx.from.id.toString()] = 'CURRENT_AFFAIRS';
+    ctx.reply(`📰 अपना करंट अफेयर्स या न्यूज़ यहाँ पेस्ट करें। मैं इसे ब्रांडिंग के साथ चैनल में भेज दूँगा!`);
+});
+
+// 📄 PDF मेकर
 bot.hears('🆕 नई PDF बनाना शुरू करें', (ctx) => {
     const userId = ctx.from.id.toString();
     userStates[userId] = 'PDF_STEP_1';
@@ -124,15 +115,11 @@ bot.hears('🆕 नई PDF बनाना शुरू करें', (ctx) => 
     ctx.reply('📄 **PDF मेकर चालू!**\n\n**स्टेप 1:** इस PDF का टाइटल (Heading) लिखकर भेजिए।');
 });
 
-// ==========================================
-// 🧠 मुख्य इंजन (मैसेज पकड़ना और पासवर्ड चेक)
-// ==========================================
 bot.on('message', async (ctx, next) => {
     if (!ctx.message.text && !ctx.message.photo) return next();
     const text = ctx.message.text || '';
     const userId = ctx.from.id.toString();
 
-    // 🔒 लॉगिन सिस्टम (आपका पुराना ढांचा)
     if (text === currentPassword) {
         authenticatedUsers.add(userId);
         allowedUsers.add(userId);
@@ -140,13 +127,12 @@ bot.on('message', async (ctx, next) => {
     }
     if (!authenticatedUsers.has(userId)) return next();
 
-    // टाइमर सेट करना
     if (userStates[userId] === 'SET_QUIZ_TIMER') {
         const time = parseInt(text);
         if (!isNaN(time)) {
             userTimers.quiz = time * 1000;
             userStates[userId] = '';
-            return ctx.reply(`✅ क्विज टाइमर: हर ${time} सेकंड में 1 क्विज।`);
+            return ctx.reply(`✅ क्विज टाइमर सेट हो गया!`);
         }
     }
     if (userStates[userId] === 'SET_POST_TIMER') {
@@ -154,28 +140,73 @@ bot.on('message', async (ctx, next) => {
         if (!isNaN(time)) {
             userTimers.post = time * 60 * 1000;
             userStates[userId] = '';
-            return ctx.reply(`✅ पोस्ट टाइमर: हर ${time} मिनट में 1 पोस्ट।`);
+            return ctx.reply(`✅ पोस्ट टाइमर सेट हो गया!`);
         }
     }
 
-    // PDF स्टेप्स
+    // करंट अफेयर्स पोस्टिंग लॉजिक
+    if (userStates[userId] === 'CURRENT_AFFAIRS') {
+        const formattedPost = `🔴 **ताज़ा जानकारी (Current Affairs)** 🔴\n\n${text}\n\n━━━━━━━━━━━━━━━━━━━━\n🎓 **Study with CP Rawat Sir**\n${promoLinks[0]}\n${promoLinks[1]}`;
+        await bot.telegram.sendMessage(TARGET_CHANNEL, formattedPost, { parse_mode: 'Markdown' });
+        userStates[userId] = '';
+        return ctx.reply('✅ आपकी पोस्ट शानदार ब्रांडिंग के साथ चैनल में भेज दी गई है!');
+    }
+
+    // असली PDF जनरेटर लॉजिक
     if (userStates[userId] === 'PDF_STEP_1') {
         pdfData[userId].title = text;
         userStates[userId] = 'PDF_STEP_2';
-        return ctx.reply(`✅ टाइटल: *${text}*\n\n**स्टेप 2:** अब थ्योरी/नोट्स पेस्ट करें।`);
+        return ctx.reply(`✅ टाइटल सेट!\n\n**स्टेप 2:** अब पूरी थ्योरी/नोट्स पेस्ट करें।`);
     }
     if (userStates[userId] === 'PDF_STEP_2') {
         pdfData[userId].content = text;
-        userStates[userId] = 'PDF_STEP_3';
-        return ctx.reply(`✅ नोट्स सेव हो गए!\n\n**स्टेप 3:** फोटो लगाना है तो भेजें, नहीं तो 'Skip' टाइप करें।`);
-    }
-    if (userStates[userId] === 'PDF_STEP_3') {
         userStates[userId] = '';
-        ctx.reply('⏳ शानदार PDF तैयार की जा रही है... (हिंदी फॉन्ट सेट होते ही फाइल मिलेगी!)');
-        return; // PDF बनाने का मुख्य कोड आगे अपडेट करेंगे
+        ctx.reply('⏳ शानदार रंग-बिरंगी PDF बनाई जा रही है... कृपया 10 सेकंड रुकें।');
+
+        try {
+            const doc = new PDFDocument({ margin: 50 });
+            const fileName = `CP_Rawat_Notes_${Date.now()}.pdf`;
+            const stream = fs.createWriteStream(fileName);
+            doc.pipe(stream);
+
+            // हिंदी फॉन्ट लोड करना (जो आपने अपलोड किया है)
+            let fontPath = 'NotoSansDevanagari-Regular.ttf';
+            if (fs.existsSync(fontPath)) {
+                doc.font(fontPath);
+            }
+
+            // ब्रांडिंग हेडर
+            doc.fontSize(22).fillColor('#D32F2F').text('Study with CP Rawat Sir', { align: 'center' });
+            doc.moveDown(0.5);
+            doc.fontSize(12).fillColor('#1976D2').text('MP TET / MP Board / All Exams', { align: 'center' });
+            doc.moveDown(1.5);
+
+            // टाइटल
+            doc.fontSize(18).fillColor('#388E3C').text(pdfData[userId].title, { align: 'center', underline: true });
+            doc.moveDown(1);
+
+            // मुख्य थ्योरी
+            doc.fontSize(14).fillColor('#000000').text(pdfData[userId].content, { align: 'left', lineGap: 4 });
+            doc.moveDown(2);
+
+            // फुटर (लिंक्स)
+            doc.fontSize(11).fillColor('#1976D2').text('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', { align: 'center' });
+            doc.text('हमारे टेलीग्राम ग्रुप्स से जुड़ें:', { align: 'center' });
+            doc.text('Channel: t.me/gkandgs12  |  Group: t.me/gkandgs85', { align: 'center' });
+
+            doc.end();
+
+            stream.on('finish', async () => {
+                await ctx.replyWithDocument({ source: fileName, filename: `${pdfData[userId].title}.pdf` }, { caption: `✅ **${pdfData[userId].title}**\n\n📚 नोट्स तैयार हैं सर!` });
+                fs.unlinkSync(fileName); // सर्वर से कचरा साफ करना
+            });
+        } catch (error) {
+            ctx.reply(`❌ PDF बनाने में एरर: ${error.message}`);
+        }
+        return;
     }
 
-    // क्विज बनाना (आपका कतार और अल्टरनेट लिंक सिस्टम)
+    // क्विज बनाना
     if (userStates[userId] === 'CREATE_POLL' || userStates[userId] === 'AUTO_POST_MODE') {
         const isAutoPost = userStates[userId] === 'AUTO_POST_MODE';
         addQuizzesToQueue(ctx, text, userId, isAutoPost);
@@ -185,7 +216,6 @@ bot.on('message', async (ctx, next) => {
     await next();
 });
 
-// प्रश्नों को छांटना और लाइन में लगाना (आपका पुराना कोड)
 function addQuizzesToQueue(ctx, text, userId, isAutoPost) {
   const rawQuestions = text.split(/(?=Q\.|Q\s|प्रश्न\s|प्र\.)/i);
   if (!userQueues[userId]) userQueues[userId] = [];
@@ -199,7 +229,7 @@ function addQuizzesToQueue(ctx, text, userId, isAutoPost) {
     let correctOptionId = -1;
     let explanationText = "";
     
-    let currentPromo = promoLinks[addedCount % 3]; // अल्टरनेट लिंक सिस्टम!
+    let currentPromo = promoLinks[addedCount % 3]; 
 
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i];
@@ -236,7 +266,7 @@ async function processQueue(ctx, userId) {
   isProcessingQueue[userId] = true;
   while (userQueues[userId] && userQueues[userId].length > 0) {
       const quizData = userQueues[userId].shift();
-      const delay = userTimers.quiz; // आपका सेट किया हुआ क्विज टाइमर!
+      const delay = userTimers.quiz; 
 
       try {
           if (quizData.isAutoPost) {
@@ -256,7 +286,6 @@ async function processQueue(ctx, userId) {
   ctx.reply(`✅ सभी पोल सफलतापूर्वक तैयार हो गए!`);
 }
 
-// 🌐 24/7 चालू रखने वाला सर्वर सिस्टम (यह बोट को सोने नहीं देगा)
 const app = express();
 app.get('/', (req, res) => res.send('CP Rawat Sir Super Bot is 24/7 Active!'));
 app.listen(process.env.PORT || 3000);
