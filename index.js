@@ -1,7 +1,5 @@
 import { Telegraf, Markup } from 'telegraf';
 import express from 'express';
-import PDFDocument from 'pdfkit';
-import fs from 'fs';
 import 'dotenv/config';
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -13,169 +11,173 @@ if (!BOT_TOKEN) {
 }
 
 const bot = new Telegraf(BOT_TOKEN);
-const allowedUsers = new Set(); 
-const authenticatedUsers = new Set(); 
-const userStates = {}; 
-const userTimers = { quiz: 2000, post: 3600000 }; // क्विज का 2 सेकंड, पोस्ट का 1 घंटा (डिफ़ॉल्ट)
-const pdfData = {}; // PDF बनाने के लिए डेटा सेव करने की जगह
+const allowedUsers = new Set();
+const userQueues = {}; 
+const processingIntervals = {}; 
+let postTimer = 5 * 60 * 1000; // डिफ़ॉल्ट 5 मिनट का टाइमर
 
+const TARGET_CHANNEL = '@gkandgs12';
 const promoLinks = [
   '📢 चैनल: https://t.me/gkandgs12',
   '💬 ग्रुप: https://t.me/gkandgs85',
   '🏆 क्विज: https://t.me/QuizClub15seconds'
 ];
-const TARGET_CHANNEL = '@gkandgs12';
 
+// क्रैश से बचाने का कवच
 process.on('uncaughtException', (err) => console.log('क्रैश रोका गया:', err.message));
 process.on('unhandledRejection', (reason) => console.log('प्रॉमिस एरर रोका गया:', reason));
 
-// ==========================================
-// 📱 लेवल-वाइज कीबोर्ड (Level-wise Keyboards)
-// ==========================================
-
 const mainMenu = Markup.keyboard([
-  ['📝 क्विज (Quiz)', '📰 थ्योरी / पोस्ट'],
-  ['📄 PDF मेकर (नोट्स)', '⚙️ सेटिंग्स']
+  ['📝 ऑटो-क्विज डालें (50+ प्रश्न)'],
+  ['⏱️ टाइमर बदलें', 'ℹ️ स्टेटस चेक करें'],
+  ['🛑 पोस्टिंग रोकें']
 ]).resize();
-
-const quizMenu = Markup.keyboard([
-  ['✍️ नया क्विज डालें', '📢 क्विज ऑटो-पोस्ट (चैनल)'],
-  ['🔙 मुख्य मेनू']
-]).resize();
-
-const postMenu = Markup.keyboard([
-  ['📝 नई पोस्ट डालें', '📢 पोस्ट ऑटो-पब्लिश'],
-  ['🔙 मुख्य मेनू']
-]).resize();
-
-const pdfMenu = Markup.keyboard([
-  ['🆕 नई PDF बनाना शुरू करें'],
-  ['🔙 मुख्य मेनू']
-]).resize();
-
-const settingsMenu = Markup.keyboard([
-  ['⏱️ क्विज टाइमर सेट करें', '⏱️ पोस्ट टाइमर सेट करें'],
-  ['🔑 यूजर परमिशन', '🔙 मुख्य मेनू']
-]).resize();
-
-// ==========================================
-// 🚀 स्टार्ट और नेविगेशन (Navigation)
-// ==========================================
 
 bot.start((ctx) => {
   const userId = ctx.from.id.toString();
-  if (allowedUsers.has(userId) || authenticatedUsers.has(userId)) {
-      ctx.reply(`👑 **प्रणाम CP Rawat Sir!**\nआपका एडवांस 'लेवल-वाइज' सिस्टम चालू है।\nनीचे दिए गए मेनू से विकल्प चुनें:👇`, mainMenu);
+  if (allowedUsers.has(userId)) {
+      ctx.reply(`👑 प्रणाम CP Rawat Sir!\nआपका सुपरफास्ट ऑटो-पोस्ट बोट चालू है।👇`, mainMenu);
   } else {
-      ctx.reply(`🛑 यह CP Rawat Sir का प्राइवेट बोट है।\nकृपया मास्टर पासवर्ड दर्ज करें:`);
+      ctx.reply(`🛑 यह प्राइवेट बोट है। कृपया मास्टर पासवर्ड दर्ज करें:`);
   }
 });
 
-// बैक बटन
-bot.hears('🔙 मुख्य मेनू', (ctx) => {
-    userStates[ctx.from.id.toString()] = ''; // स्टेट क्लियर करें
-    ctx.reply('🏠 आप मुख्य मेनू में हैं।', mainMenu);
-});
-
-// मेन बटन क्लिक्स
-bot.hears('📝 क्विज (Quiz)', (ctx) => ctx.reply('📝 **क्विज सेक्शन** में आपका स्वागत है।', quizMenu));
-bot.hears('📰 थ्योरी / पोस्ट', (ctx) => ctx.reply('📰 **थ्योरी और पोस्ट सेक्शन** खुला है।', postMenu));
-bot.hears('📄 PDF मेकर (नोट्स)', (ctx) => ctx.reply('📄 **PDF मेकर** तैयार है।', pdfMenu));
-bot.hears('⚙️ सेटिंग्स', (ctx) => ctx.reply('⚙️ **सेटिंग्स** खुल गई हैं।', settingsMenu));
-
-// ==========================================
-// ⏱️ टाइमर सेटिंग्स
-// ==========================================
-
-bot.hears('⏱️ क्विज टाइमर सेट करें', (ctx) => {
-    userStates[ctx.from.id.toString()] = 'SET_QUIZ_TIMER';
-    ctx.reply('⏱️ क्विज के लिए कितने **सेकंड** का गैप रखना है? (नंबर लिखें)');
-});
-
-bot.hears('⏱️ पोस्ट टाइमर सेट करें', (ctx) => {
-    userStates[ctx.from.id.toString()] = 'SET_POST_TIMER';
-    ctx.reply('⏱️ थ्योरी पोस्ट के लिए कितने **मिनट** का गैप रखना है? (नंबर लिखें)');
-});
-
-// ==========================================
-// 📄 PDF विज़ार्ड (Step-by-Step PDF Maker)
-// ==========================================
-
-bot.hears('🆕 नई PDF बनाना शुरू करें', (ctx) => {
+bot.hears('🛑 पोस्टिंग रोकें', (ctx) => {
     const userId = ctx.from.id.toString();
-    userStates[userId] = 'PDF_STEP_1_TITLE';
-    pdfData[userId] = {};
-    ctx.reply('📄 **PDF मेकर चालू!**\n\n**स्टेप 1:** सबसे पहले इस PDF का टाइटल (Heading) लिखकर भेजिए।\n(जैसे: प्रकाश का परावर्तन)');
+    if (processingIntervals[userId]) {
+        clearInterval(processingIntervals[userId]);
+        delete processingIntervals[userId];
+        ctx.reply('🛑 ऑटो-पोस्टिंग रोक दी गई है। बचे हुए प्रश्न सुरक्षित हैं।');
+    } else {
+        ctx.reply('⚠️ अभी कोई पोस्टिंग नहीं चल रही है।');
+    }
 });
 
-// ==========================================
-// 🧠 मुख्य इंजन (मैसेज पकड़ना)
-// ==========================================
+bot.hears('ℹ️ स्टेटस चेक करें', (ctx) => {
+    const userId = ctx.from.id.toString();
+    const remaining = userQueues[userId] ? userQueues[userId].length : 0;
+    const minutes = postTimer / 60000;
+    ctx.reply(`📊 **बोट का स्टेटस:**\n\n🕒 टाइमर सेट है: हर ${minutes} मिनट\n📦 कतार में बचे प्रश्न: ${remaining}`);
+});
 
-bot.on('message', async (ctx, next) => {
-    if (!ctx.message.text && !ctx.message.photo) return next();
-    
-    const text = ctx.message.text || '';
+bot.hears('⏱️ टाइमर बदलें', (ctx) => {
+    ctx.reply('⏱️ हर प्रश्न के बीच कितने **मिनट** का गैप रखना है? (सिर्फ नंबर लिखें, जैसे: 2, 5, 10)');
+});
+
+bot.hears('📝 ऑटो-क्विज डालें (50+ प्रश्न)', (ctx) => {
+    if (!allowedUsers.has(ctx.from.id.toString())) return;
+    ctx.reply('📝 कृपया अपने 50 (या जितने भी) प्रश्न यहाँ पेस्ट करें। मैं उन्हें कतार में लगा दूँगा।');
+});
+
+bot.on('text', (ctx) => {
+    const text = ctx.message.text;
     const userId = ctx.from.id.toString();
 
     // पासवर्ड चेक
     if (text === currentPassword) {
-        authenticatedUsers.add(userId);
         allowedUsers.add(userId);
-        return ctx.reply('✅ पासवर्ड सही है! बोट अनलॉक हो गया है।', mainMenu);
+        return ctx.reply('✅ पासवर्ड सही है! बोट अनलॉक हो गया।', mainMenu);
     }
-
-    if (!authenticatedUsers.has(userId)) return next();
+    if (!allowedUsers.has(userId)) return;
 
     // टाइमर सेट करना
-    if (userStates[userId] === 'SET_QUIZ_TIMER') {
-        const time = parseInt(text);
-        if (time > 0) {
-            userTimers.quiz = time * 1000;
-            userStates[userId] = '';
-            return ctx.reply(`✅ क्विज टाइमर सेट: हर ${time} सेकंड में 1 क्विज।`, settingsMenu);
+    if (!isNaN(text) && Number(text) > 0 && text.length < 5) {
+        postTimer = Number(text) * 60 * 1000;
+        return ctx.reply(`✅ टाइमर बदल गया! अब हर ${text} मिनट में 1 प्रश्न जाएगा।`);
+    }
+
+    // अगर प्रश्न आए हैं
+    if (text.length > 20 && text.includes('✅')) {
+        addQuizzesToQueue(ctx, text, userId);
+    }
+});
+
+function addQuizzesToQueue(ctx, text, userId) {
+    const rawQuestions = text.split(/(?=Q\.|Q\s|प्रश्न\s|प्र\.)/i);
+    if (!userQueues[userId]) userQueues[userId] = [];
+    
+    let addedCount = 0;
+    let promoIndex = 0;
+
+    for (const rawQ of rawQuestions) {
+        if (!rawQ.trim() || rawQ.trim().length < 10) continue;
+        const lines = rawQ.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+        let question = lines[0];
+        let options = [];
+        let correctOptionId = -1;
+        let explanationText = "";
+        
+        // लिंक्स अल्टरनेट (Rotate) करने का लॉजिक
+        let currentPromo = promoLinks[promoIndex % 3];
+
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i];
+            if (line.toLowerCase().startsWith('व्याख्या:') || line.toLowerCase().startsWith('explain:')) {
+                let ext = line.replace(/व्याख्या:|explain:/i, '').trim();
+                if (ext.length > 150) ext = ext.substring(0, 147) + '...';
+                explanationText = `${ext}\n\n${currentPromo}`;
+                break;
+            }
+            if (line.match(/^[A-D]\)|^[A-D]\.|^[1-4]\)|^[1-4]\./i)) {
+                let cleanOption = line.replace(/^[A-D]\)|^[A-D]\.|^[1-4]\)|^[1-4]\./i, '').trim();
+                if (line.includes('✅')) {
+                    cleanOption = cleanOption.replace('✅', '').trim();
+                    correctOptionId = options.length;
+                }
+                options.push(cleanOption);
+            }
+        }
+
+        if (options.length >= 2 && correctOptionId !== -1) {
+            if (!explanationText) explanationText = `📚 नोट्स व क्विज के लिए जुड़ें!\n\n${currentPromo}`;
+            userQueues[userId].push({ question, options, correctOptionId, explanation: explanationText });
+            addedCount++;
+            promoIndex++;
         }
     }
 
-    if (userStates[userId] === 'SET_POST_TIMER') {
-        const time = parseInt(text);
-        if (time > 0) {
-            userTimers.post = time * 60 * 1000; // मिनट को मिलीसेकंड में बदला
-            userStates[userId] = '';
-            return ctx.reply(`✅ पोस्ट टाइमर सेट: हर ${time} मिनट में 1 पोस्ट।`, settingsMenu);
-        }
+    if (addedCount > 0) {
+        ctx.reply(`✅ आपके ${addedCount} प्रश्न कतार (Queue) में लग गए हैं।\n⏳ ऑटो-पोस्टिंग शुरू हो रही है...`);
+        startAutoPosting(userId, ctx.chat.id);
     }
+}
 
-    // PDF स्टेप 1: टाइटल
-    if (userStates[userId] === 'PDF_STEP_1_TITLE') {
-        pdfData[userId].title = text;
-        userStates[userId] = 'PDF_STEP_2_CONTENT';
-        return ctx.reply(`✅ टाइटल सेट हो गया: *${text}*\n\n**स्टेप 2:** अब अपनी पूरी थ्योरी/नोट्स यहाँ पेस्ट करें।`);
-    }
+function startAutoPosting(userId, chatId) {
+    if (processingIntervals[userId]) return; // पहले से चल रहा है तो दोबारा चालू न करें
 
-    // PDF स्टेप 2: कंटेंट
-    if (userStates[userId] === 'PDF_STEP_2_CONTENT') {
-        pdfData[userId].content = text;
-        userStates[userId] = 'PDF_STEP_3_PHOTO';
-        return ctx.reply(`✅ नोट्स सेव हो गए!\n\n**स्टेप 3:** क्या आप PDF में कोई फोटो लगाना चाहते हैं? \nअगर हाँ, तो फोटो भेजिए। \nअगर नहीं, तो **Skip** टाइप करके भेज दीजिए।`);
-    }
+    sendNextQuiz(userId, chatId); // तुरंत पहला प्रश्न भेजें
 
-    // PDF स्टेप 3: फोटो और PDF जनरेशन
-    if (userStates[userId] === 'PDF_STEP_3_PHOTO') {
-        ctx.reply('⏳ शानदार PDF तैयार की जा रही है, कृपया प्रतीक्षा करें...');
-        // (यहाँ अगले चरण में हम असली PDF बनाने का कोड जोड़ेंगे)
-        userStates[userId] = '';
-        setTimeout(() => {
-            ctx.reply('✅ (डेमो) आपकी PDF का डेटा मेरे पास आ गया है! हिंदी फॉन्ट का सेटअप होते ही मैं आपको फाइल दे दूँगा।', pdfMenu);
-        }, 2000);
+    // फिर टाइमर के हिसाब से लूप चलाएं
+    processingIntervals[userId] = setInterval(() => {
+        sendNextQuiz(userId, chatId);
+    }, postTimer);
+}
+
+async function sendNextQuiz(userId, chatId) {
+    if (!userQueues[userId] || userQueues[userId].length === 0) {
+        // प्रश्न खत्म हो गए
+        clearInterval(processingIntervals[userId]);
+        delete processingIntervals[userId];
+        bot.telegram.sendMessage(chatId, `🚨 **सर, आपके डाले हुए सारे प्रश्न खत्म हो गए हैं!**\n\nकृपया '📝 ऑटो-क्विज डालें' पर क्लिक करके नए प्रश्न पेस्ट कर दीजिए।`);
         return;
     }
 
-    await next();
-});
+    const q = userQueues[userId].shift();
+    try {
+        await bot.telegram.sendQuiz(TARGET_CHANNEL, q.question, q.options, {
+            correct_option_id: q.correctOptionId,
+            explanation: q.explanation,
+            is_anonymous: true
+        });
+    } catch (err) {
+        console.log("पोस्ट करने में एरर:", err.message);
+    }
+}
 
+// 24/7 वेब सर्वर (अलार्म)
 const app = express();
-app.get('/', (req, res) => res.send('CP Rawat Sir Advanced Bot is Active!'));
+app.get('/', (req, res) => res.send('CP Rawat Auto-Post Engine Running!'));
 app.listen(process.env.PORT || 3000);
 
-bot.launch().then(() => console.log('🚀 Level-Wise Bot Started!'));
+bot.launch().then(() => console.log('🚀 Final Bulletproof Bot Started!'));
+
